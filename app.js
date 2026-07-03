@@ -134,11 +134,12 @@ async function bizTenants() {
       <td style="text-align:right">${money(r.ap)}</td>
       <td style="text-align:right">${money2(r.gross_revenue)}</td>
       <td style="text-align:right;color:var(--gold);font-weight:600">${money2(r.arcane_cut)}</td>
-      <td style="text-align:right"><button class="btn-ghost sm" data-cfg="${r.tenant_id}"><i class="ti ti-adjustments"></i></button></td>
+      <td style="text-align:right;white-space:nowrap"><button class="btn-ghost sm" data-enter="${r.tenant_id}" title="Enter portal — manage this tenant as its admin"><i class="ti ti-login-2"></i></button> <button class="btn-ghost sm" data-cfg="${r.tenant_id}" title="Config"><i class="ti ti-adjustments"></i></button></td>
     </tr>`).join("");
   b.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn-gold" id="biz-new"><i class="ti ti-plus"></i> New tenant</button></div>
     <div class="panel"><table class="data-tbl"><thead><tr><th>Tenant</th><th>Type</th><th>Lead mode</th><th style="text-align:right">Take</th><th style="text-align:right">Agents</th><th style="text-align:right">Leads</th><th style="text-align:right">AP</th><th style="text-align:right">Gross rev</th><th style="text-align:right">Arcane cut</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
   b.querySelectorAll("[data-cfg]").forEach((x) => x.addEventListener("click", () => openTenantConfig(BIZ_TENANTS.find((t) => t.tenant_id === x.dataset.cfg))));
+  b.querySelectorAll("[data-enter]").forEach((x) => x.addEventListener("click", () => window.open(`https://app.arcaneleadsolutions.com/?mode=dev&manage=${x.dataset.enter}`, "_blank")));
   $("#biz-new")?.addEventListener("click", openNewTenant);
 }
 function openTenantConfig(r) {
