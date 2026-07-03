@@ -93,7 +93,7 @@ function renderApp() {
 }
 
 // ---------------------------------------------------------------- business console
-const BIZ_TABS = [["overview", "Overview", "ti-chart-bar"], ["tenants", "Tenants", "ti-building-community"], ["leads", "Leads", "ti-users"], ["sales", "Sales", "ti-coin"]];
+const BIZ_TABS = [["overview", "Overview", "ti-chart-bar"], ["tenants", "Tenants", "ti-building-community"], ["leads", "Leads", "ti-users"], ["sales", "Sales", "ti-coin"], ["activity", "Activity", "ti-history"]];
 const BIZ_TYPE = { in_house: "In House", imo: "IMO", agency: "Agency" };
 let BIZ_TAB = "overview", BIZ_TENANTS = [];
 function loadBusiness() {
@@ -102,7 +102,7 @@ function loadBusiness() {
     <div class="pf-tabs">${BIZ_TABS.map(([id, lab, ic]) => `<span class="pf-tab ${BIZ_TAB === id ? "on" : ""}" data-biz="${id}"><i class="ti ${ic}"></i> ${lab}</span>`).join("")}</div>
     <div id="biz-body">${skelTable()}</div>`;
   c.querySelectorAll("[data-biz]").forEach((t) => t.addEventListener("click", () => { BIZ_TAB = t.dataset.biz; loadBusiness(); }));
-  ({ overview: bizOverview, tenants: bizTenants, leads: bizLeads, sales: bizSales })[BIZ_TAB]();
+  ({ overview: bizOverview, tenants: bizTenants, leads: bizLeads, sales: bizSales, activity: bizActivity })[BIZ_TAB]();
 }
 async function bizOverview() {
   const b = $("#biz-body");
@@ -231,6 +231,22 @@ async function bizSales() {
   try { rows = (await sb.rpc("platform_sales")).data || []; } catch { b.innerHTML = `<div class="coming"><b>Platform admins only</b></div>`; return; }
   if (!rows.length) { b.innerHTML = `<div class="coming"><div class="badge"><i class="ti ti-coin"></i></div><b>No sales yet</b></div>`; return; }
   b.innerHTML = `<div class="panel"><table class="data-tbl"><thead><tr><th>Tenant</th><th>Carrier</th><th style="text-align:right">Deals</th><th style="text-align:right">AP</th><th style="text-align:right">Call deals</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.tenant || "—")}</td><td>${esc(r.carrier)}</td><td style="text-align:right">${r.deals}</td><td style="text-align:right">${money(r.ap)}</td><td style="text-align:right">${r.call_deals}</td></tr>`).join("")}</tbody></table></div>`;
+}
+// Impersonation audit trail — who logged in as whom, when.
+async function bizActivity() {
+  const b = $("#biz-body");
+  let rows = [];
+  try { rows = (await sb.from("impersonation_log").select("created_at, admin_email, target_email, tenants(slug,name)").order("created_at", { ascending: false }).limit(200)).data || []; }
+  catch { b.innerHTML = `<div class="coming"><b>Platform admins only</b></div>`; return; }
+  if (!rows.length) { b.innerHTML = `<div class="coming"><div class="badge"><i class="ti ti-history"></i></div><b>No support sessions yet</b><div>When you log in as an agent, it's recorded here.</div></div>`; return; }
+  const fmt = (t) => { try { return new Date(t).toLocaleString(); } catch { return t; } };
+  b.innerHTML = `<div class="muted2" style="margin-bottom:8px">Every "Log in as" session, most recent first (last 200).</div>
+    <div class="panel"><table class="data-tbl"><thead><tr><th>When</th><th>Platform admin</th><th>Logged in as</th><th>Tenant</th></tr></thead><tbody>${rows.map((r) => `<tr>
+      <td>${esc(fmt(r.created_at))}</td>
+      <td>${esc(r.admin_email || "—")}</td>
+      <td><i class="ti ti-user-shield" style="color:var(--gold);margin-right:5px"></i>${esc(r.target_email || "—")}</td>
+      <td>${esc(r.tenants?.name || r.tenants?.slug || "—")}</td>
+    </tr>`).join("")}</tbody></table></div>`;
 }
 
 boot();
