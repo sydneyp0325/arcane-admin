@@ -93,7 +93,7 @@ function renderApp() {
 }
 
 // ---------------------------------------------------------------- business console
-const BIZ_TABS = [["overview", "Overview", "ti-chart-bar"], ["tenants", "Tenants", "ti-building-community"], ["leads", "Leads", "ti-users"], ["sales", "Sales", "ti-coin"], ["activity", "Activity", "ti-history"]];
+const BIZ_TABS = [["overview", "Overview", "ti-chart-bar"], ["tenants", "Tenants", "ti-building-community"], ["leads", "Leads", "ti-users"], ["sales", "Sales", "ti-coin"], ["calls", "Calls", "ti-phone"], ["activity", "Activity", "ti-history"]];
 const BIZ_TYPE = { in_house: "In House", imo: "IMO", agency: "Agency" };
 let BIZ_TAB = "overview", BIZ_TENANTS = [];
 function loadBusiness() {
@@ -102,7 +102,7 @@ function loadBusiness() {
     <div class="pf-tabs">${BIZ_TABS.map(([id, lab, ic]) => `<span class="pf-tab ${BIZ_TAB === id ? "on" : ""}" data-biz="${id}"><i class="ti ${ic}"></i> ${lab}</span>`).join("")}</div>
     <div id="biz-body">${skelTable()}</div>`;
   c.querySelectorAll("[data-biz]").forEach((t) => t.addEventListener("click", () => { BIZ_TAB = t.dataset.biz; loadBusiness(); }));
-  ({ overview: bizOverview, tenants: bizTenants, leads: bizLeads, sales: bizSales, activity: bizActivity })[BIZ_TAB]();
+  ({ overview: bizOverview, tenants: bizTenants, leads: bizLeads, sales: bizSales, calls: bizCalls, activity: bizActivity })[BIZ_TAB]();
 }
 async function bizOverview() {
   const b = $("#biz-body");
@@ -232,6 +232,32 @@ async function bizSales() {
   if (!rows.length) { b.innerHTML = `<div class="coming"><div class="badge"><i class="ti ti-coin"></i></div><b>No sales yet</b></div>`; return; }
   b.innerHTML = `<div class="panel"><table class="data-tbl"><thead><tr><th>Tenant</th><th>Carrier</th><th style="text-align:right">Deals</th><th style="text-align:right">AP</th><th style="text-align:right">Call deals</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.tenant || "—")}</td><td>${esc(r.carrier)}</td><td style="text-align:right">${r.deals}</td><td style="text-align:right">${money(r.ap)}</td><td style="text-align:right">${r.call_deals}</td></tr>`).join("")}</tbody></table></div>`;
 }
+// Platform-wide inbound call log across every tenant.
+const CALL_PILL = { received: "grey", routed: "yellow", connected: "green", completed: "blue", missed: "red", no_agent: "red", failed: "red" };
+async function bizCalls() {
+  const b = $("#biz-body");
+  let rows = [];
+  try { rows = (await sb.rpc("platform_call_log")).data || []; }
+  catch { b.innerHTML = `<div class="coming"><b>Platform admins only</b></div>`; return; }
+  if (!rows.length) { b.innerHTML = `<div class="coming"><div class="badge"><i class="ti ti-phone"></i></div><b>No calls yet</b></div>`; return; }
+  const fmt = (t) => { try { return new Date(t).toLocaleString(); } catch { return t; } };
+  const dur = (s) => { s = +s || 0; return s ? Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") : "—"; };
+  const connN = rows.filter(r => r.connected || r.status === "connected" || r.status === "completed").length;
+  const spend = rows.reduce((s, r) => s + (r.billable ? +r.price || 0 : 0), 0);
+  const body = rows.map(r => `<tr>
+    <td>${esc(fmt(r.started_at))}</td>
+    <td><span class="pill grey">${esc(r.tenant || "—")}</span></td>
+    <td>${r.agent_name ? esc(r.agent_name) : '<span class="muted2">— no agent</span>'}</td>
+    <td>${esc(r.caller_number || "—")}${r.caller_state ? ` · ${esc(r.caller_state)}` : ""}</td>
+    <td><span class="pill ${CALL_PILL[r.status] || "grey"}">${esc(r.status)}</span></td>
+    <td style="text-align:right">${dur(r.talk_sec)}</td>
+    <td style="text-align:right">${r.billable ? money(r.price) : '<span class="muted2">—</span>'}</td>
+    <td style="text-align:right">${r.deal_id ? '<span class="pill green">Sold</span>' : "—"}</td>
+  </tr>`).join("");
+  b.innerHTML = `<div class="muted2" style="margin-bottom:8px">Every inbound call across all tenants (last 500). ${rows.length} calls · ${connN} connected · ${money(spend)} billed.</div>
+    <div class="panel"><table class="data-tbl"><thead><tr><th>When</th><th>Tenant</th><th>Agent</th><th>Caller</th><th>Status</th><th style="text-align:right">Talk</th><th style="text-align:right">Billable</th><th style="text-align:right">Deal</th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
 // Impersonation audit trail — who logged in as whom, when.
 async function bizActivity() {
   const b = $("#biz-body");
