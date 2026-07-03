@@ -134,13 +134,38 @@ async function bizTenants() {
       <td style="text-align:right">${money(r.ap)}</td>
       <td style="text-align:right">${money2(r.gross_revenue)}</td>
       <td style="text-align:right;color:var(--gold);font-weight:600">${money2(r.arcane_cut)}</td>
-      <td style="text-align:right;white-space:nowrap"><button class="btn-ghost sm" data-enter="${r.tenant_id}" title="Enter portal — manage this tenant as its admin"><i class="ti ti-login-2"></i></button> <button class="btn-ghost sm" data-cfg="${r.tenant_id}" title="Config"><i class="ti ti-adjustments"></i></button></td>
+      <td style="text-align:right;white-space:nowrap"><button class="btn-ghost sm" data-imp="${r.tenant_id}" data-imp-name="${esc(r.name || r.slug)}" title="Log in as an agent in this tenant"><i class="ti ti-user-shield"></i></button> <button class="btn-ghost sm" data-cfg="${r.tenant_id}" title="Config"><i class="ti ti-adjustments"></i></button></td>
     </tr>`).join("");
   b.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn-gold" id="biz-new"><i class="ti ti-plus"></i> New tenant</button></div>
     <div class="panel"><table class="data-tbl"><thead><tr><th>Tenant</th><th>Type</th><th>Lead mode</th><th style="text-align:right">Take</th><th style="text-align:right">Agents</th><th style="text-align:right">Leads</th><th style="text-align:right">AP</th><th style="text-align:right">Gross rev</th><th style="text-align:right">Arcane cut</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
   b.querySelectorAll("[data-cfg]").forEach((x) => x.addEventListener("click", () => openTenantConfig(BIZ_TENANTS.find((t) => t.tenant_id === x.dataset.cfg))));
-  b.querySelectorAll("[data-enter]").forEach((x) => x.addEventListener("click", () => window.open(`https://app.arcaneleadsolutions.com/?mode=dev&manage=${x.dataset.enter}`, "_blank")));
+  b.querySelectorAll("[data-imp]").forEach((x) => x.addEventListener("click", () => openImpersonatePicker(x.dataset.imp, x.dataset.impName)));
   $("#biz-new")?.addEventListener("click", openNewTenant);
+}
+// Log in as any agent in a tenant (platform admins only) to help them.
+async function openImpersonatePicker(tenantId, tenantName) {
+  const m = document.createElement("div"); m.className = "modal-bg";
+  m.innerHTML = `<div class="modal" style="width:440px;max-height:80vh;display:flex;flex-direction:column"><div class="modal-h"><span><i class="ti ti-user-shield" style="color:var(--gold)"></i> Log in as — ${esc(tenantName || "tenant")}</span><i class="ti ti-x" id="ip-x" style="cursor:pointer;color:var(--tx3)"></i></div>
+    <div class="modal-b" style="overflow:auto"><div class="muted2" style="margin-bottom:8px">Pick an agent to open their portal and act on their behalf. This is logged.</div><div id="ip-list"><div class="muted2">Loading agents…</div></div></div></div>`;
+  document.body.appendChild(m);
+  const close = () => m.remove();
+  m.addEventListener("click", (e) => { if (e.target === m) close(); });
+  $("#ip-x").addEventListener("click", close);
+  let agents = [];
+  try { agents = (await sb.rpc("platform_agents", { p_tenant: tenantId })).data || []; }
+  catch (e) { $("#ip-list").innerHTML = `<div class="muted2" style="color:var(--red)">${esc(e.message || "Couldn't load agents")}</div>`; return; }
+  if (!agents.length) { $("#ip-list").innerHTML = `<div class="muted2">No agents in this tenant yet.</div>`; return; }
+  $("#ip-list").innerHTML = agents.map((a) => `<div class="ip-row" style="display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line)">
+      <div style="flex:1;min-width:0"><div style="font-weight:600">${esc(a.full_name || a.email)} ${a.access_level === "admin" ? '<span class="pill gold" style="margin-left:4px">Admin</span>' : ""}</div><div class="muted2">${esc(a.email || "")}</div></div>
+      ${a.has_login ? `<button class="btn-gold sm" data-login="${a.agent_id}" data-name="${esc(a.full_name || a.email || "agent")}"><i class="ti ti-login-2"></i> Log in as</button>` : `<span class="muted2" title="Agent hasn't created a login yet">No login</span>`}
+    </div>`).join("");
+  $("#ip-list").querySelectorAll("[data-login]").forEach((btn) => btn.addEventListener("click", async () => {
+    btn.disabled = true; btn.innerHTML = `<i class="ti ti-loader"></i> Opening…`;
+    const { data, error } = await sb.functions.invoke("admin-impersonate", { body: { agent_id: btn.dataset.login } });
+    if (error || data?.error) { btn.disabled = false; btn.innerHTML = `<i class="ti ti-login-2"></i> Log in as`; toast((data?.error || error?.message) || "Couldn't start session"); return; }
+    const url = `https://app.arcaneleadsolutions.com/?impersonate=${encodeURIComponent(data.token_hash)}&as=${encodeURIComponent(data.name || btn.dataset.name)}`;
+    window.open(url, "_blank"); close();
+  }));
 }
 function openTenantConfig(r) {
   if (!r) return;
