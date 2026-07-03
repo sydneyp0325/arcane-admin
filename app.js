@@ -93,7 +93,7 @@ function renderApp() {
 }
 
 // ---------------------------------------------------------------- business console
-const BIZ_TABS = [["overview", "Overview", "ti-chart-bar"], ["tenants", "Tenants", "ti-building-community"], ["leads", "Leads", "ti-users"], ["sales", "Sales", "ti-coin"], ["calls", "Calls", "ti-phone"], ["activity", "Activity", "ti-history"]];
+const BIZ_TABS = [["overview", "Overview", "ti-chart-bar"], ["tenants", "Tenants", "ti-building-community"], ["catalog", "Catalog", "ti-forms"], ["leads", "Leads", "ti-users"], ["sales", "Sales", "ti-coin"], ["calls", "Calls", "ti-phone"], ["activity", "Activity", "ti-history"]];
 const BIZ_TYPE = { in_house: "In House", imo: "IMO", agency: "Agency" };
 let BIZ_TAB = "overview", BIZ_TENANTS = [];
 function loadBusiness() {
@@ -102,7 +102,7 @@ function loadBusiness() {
     <div class="pf-tabs">${BIZ_TABS.map(([id, lab, ic]) => `<span class="pf-tab ${BIZ_TAB === id ? "on" : ""}" data-biz="${id}"><i class="ti ${ic}"></i> ${lab}</span>`).join("")}</div>
     <div id="biz-body">${skelTable()}</div>`;
   c.querySelectorAll("[data-biz]").forEach((t) => t.addEventListener("click", () => { BIZ_TAB = t.dataset.biz; loadBusiness(); }));
-  ({ overview: bizOverview, tenants: bizTenants, leads: bizLeads, sales: bizSales, calls: bizCalls, activity: bizActivity })[BIZ_TAB]();
+  ({ overview: bizOverview, tenants: bizTenants, catalog: bizCatalog, leads: bizLeads, sales: bizSales, calls: bizCalls, activity: bizActivity })[BIZ_TAB]();
 }
 async function bizOverview() {
   const b = $("#biz-body");
@@ -256,6 +256,83 @@ async function bizCalls() {
   </tr>`).join("");
   b.innerHTML = `<div class="muted2" style="margin-bottom:8px">Every inbound call across all tenants (last 500). ${rows.length} calls · ${connN} connected · ${money(spend)} billed.</div>
     <div class="panel"><table class="data-tbl"><thead><tr><th>When</th><th>Tenant</th><th>Agent</th><th>Caller</th><th>Status</th><th style="text-align:right">Talk</th><th style="text-align:right">Billable</th><th style="text-align:right">Deal</th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+// Global catalog — lead types + their custom fields (shared by every tenant).
+async function bizCatalog() {
+  const b = $("#biz-body");
+  let types = [];
+  try { types = (await sb.from("lead_types").select("id,name,slug,is_active,sort_order, lead_type_fields(id)").is("tenant_id", null).order("sort_order")).data || []; }
+  catch { b.innerHTML = `<div class="coming"><b>Platform admins only</b></div>`; return; }
+  const rows = types.map(t => `<tr>
+    <td><b>${esc(t.name)}</b><div class="muted2">${esc(t.slug || "")}</div></td>
+    <td style="text-align:right">${(t.lead_type_fields || []).length}</td>
+    <td>${t.is_active ? '<span class="pill green">Active</span>' : '<span class="pill grey">Off</span>'}</td>
+    <td style="text-align:right;white-space:nowrap"><button class="btn-gold sm" data-fields="${t.id}" data-name="${esc(t.name)}"><i class="ti ti-forms"></i> Fields</button> <button class="btn-ghost sm" data-toggletype="${t.id}" data-active="${t.is_active}">${t.is_active ? "Deactivate" : "Activate"}</button></td>
+  </tr>`).join("");
+  b.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="muted2">Lead types &amp; their fields are shared by every tenant — changes publish instantly.</div><button class="btn-gold" id="cat-newtype"><i class="ti ti-plus"></i> New lead type</button></div>
+    <div class="panel"><table class="data-tbl"><thead><tr><th>Lead type</th><th style="text-align:right">Fields</th><th>Status</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="4" style="text-align:center;color:var(--tx3);padding:30px">No lead types yet.</td></tr>`}</tbody></table></div>`;
+  $("#cat-newtype").onclick = openNewLeadType;
+  b.querySelectorAll("[data-fields]").forEach(x => x.onclick = () => openTypeFields(x.dataset.fields, x.dataset.name));
+  b.querySelectorAll("[data-toggletype]").forEach(x => x.onclick = async () => {
+    const { error } = await sb.from("lead_types").update({ is_active: x.dataset.active !== "true" }).eq("id", x.dataset.toggletype);
+    if (error) { toast(error.message); return; } bizCatalog();
+  });
+}
+function openNewLeadType() {
+  const m = document.createElement("div"); m.className = "modal-bg";
+  m.innerHTML = `<div class="modal" style="width:400px"><div class="modal-h"><span><i class="ti ti-forms" style="color:var(--gold)"></i> New lead type</span><i class="ti ti-x" id="lt-x" style="cursor:pointer;color:var(--tx3)"></i></div>
+    <div class="modal-b"><div class="field"><label>Name *</label><input class="in" id="lt-name" placeholder="e.g. Final Expense"></div>
+      <div id="lt-err" style="color:var(--red);font-size:12px;min-height:14px"></div>
+      <div class="muted2" style="font-size:11px;margin-bottom:8px">Add its custom fields after creating. New types start with no tiers — set prices per tenant.</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-ghost" id="lt-cancel">Cancel</button><button class="btn-gold" id="lt-go"><i class="ti ti-check"></i> Create</button></div></div></div>`;
+  document.body.appendChild(m);
+  const close = () => m.remove();
+  m.addEventListener("click", e => { if (e.target === m) close(); });
+  $("#lt-x").onclick = close; $("#lt-cancel").onclick = close;
+  $("#lt-go").onclick = async () => {
+    const name = $("#lt-name").value.trim(); if (!name) { $("#lt-err").textContent = "Name is required."; return; }
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const { error } = await sb.from("lead_types").insert({ name, slug, tenant_id: null, is_active: true, sort_order: 99 });
+    if (error) { $("#lt-err").textContent = error.message; return; }
+    close(); toast("Lead type created"); bizCatalog();
+  };
+}
+async function openTypeFields(typeId, typeName) {
+  const m = document.createElement("div"); m.className = "modal-bg";
+  m.innerHTML = `<div class="modal" style="width:520px;max-height:84vh;display:flex;flex-direction:column"><div class="modal-h"><span><i class="ti ti-forms" style="color:var(--gold)"></i> ${esc(typeName)} — fields</span><i class="ti ti-x" id="tf-x" style="cursor:pointer;color:var(--tx3)"></i></div>
+    <div class="modal-b" style="overflow:auto"><div class="muted2" style="margin-bottom:8px">These fields show in the import mapper and the integrations view for every tenant.</div>
+      <div id="tf-list"><div class="muted2">Loading…</div></div>
+      <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
+          <div class="field" style="margin:0"><label>Label</label><input class="in" id="tf-label" placeholder="Mortgage balance"></div>
+          <div class="field" style="margin:0"><label>Field key</label><input class="in" id="tf-key" placeholder="mortgage_balance"></div>
+          <button class="btn-gold" id="tf-add"><i class="ti ti-plus"></i> Add</button>
+        </div><div id="tf-err" style="color:var(--red);font-size:12px;min-height:14px"></div>
+      </div></div></div>`;
+  document.body.appendChild(m);
+  const close = () => { m.remove(); bizCatalog(); };
+  m.addEventListener("click", e => { if (e.target === m) close(); });
+  $("#tf-x").onclick = close;
+  // auto-suggest a key from the label
+  $("#tf-label").addEventListener("input", () => { const k = $("#tf-key"); if (!k.dataset.touched) k.value = $("#tf-label").value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""); });
+  $("#tf-key").addEventListener("input", () => { $("#tf-key").dataset.touched = "1"; });
+  async function renderFields() {
+    let fields = [];
+    try { fields = (await sb.from("lead_type_fields").select("id,field_key,label,sort_order").eq("lead_type_id", typeId).order("sort_order")).data || []; } catch { }
+    $("#tf-list").innerHTML = fields.length ? fields.map(f => `<div style="display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid var(--line)">
+      <div style="flex:1"><b>${esc(f.label)}</b> <code style="font-size:11px;color:var(--tx3)">${esc(f.field_key)}</code></div>
+      <button class="btn-ghost sm" data-delf="${f.id}"><i class="ti ti-trash"></i></button></div>`).join("") : `<div class="muted2">No fields yet — add some below.</div>`;
+    $("#tf-list").querySelectorAll("[data-delf]").forEach(x => x.onclick = async () => { await sb.from("lead_type_fields").delete().eq("id", x.dataset.delf); renderFields(); });
+  }
+  renderFields();
+  $("#tf-add").onclick = async () => {
+    const label = $("#tf-label").value.trim(); const key = $("#tf-key").value.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+    if (!label || !key) { $("#tf-err").textContent = "Label and key are required."; return; }
+    const { error } = await sb.from("lead_type_fields").insert({ lead_type_id: typeId, label, field_key: key, sort_order: 999 });
+    if (error) { $("#tf-err").textContent = error.message; return; }
+    $("#tf-label").value = ""; $("#tf-key").value = ""; delete $("#tf-key").dataset.touched; $("#tf-err").textContent = ""; renderFields();
+  };
 }
 
 // Impersonation audit trail — who logged in as whom, when.
